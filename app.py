@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Query, File, UploadFile
+from fastapi import FastAPI, Query, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
+import time
+import pymysql
 
 from functions import NBAPredictor   # la classe O.O (Orientée Objet)
 
@@ -26,6 +28,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Configuration de la connexion à la base de données ---
+DB_HOST = "<TON_ENDPOINT_RDS>"  # Le point de terminaison de ton cluster
+DB_USER = "admin"
+DB_PASSWORD = "<TON_MOT_DE_PASSE_RDS>"
+DB_NAME = "nba_db"
+
+def get_db_connection():
+    return pymysql.connect(host=DB_HOST,
+                           user=DB_USER,
+                           password=DB_PASSWORD,
+                           database=DB_NAME,
+                           cursorclass=pymysql.cursors.DictCursor)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    
+    # Lire le corps de la requête (pour POST, etc.)
+    request_body = await request.body()
+    
+    response = await call_next(request)
+    
+    process_time = (time.time() - start_time) * 1000
+    
+    # Lire le corps de la réponse
+    response_body_bytes = b""
+    async for chunk in response.body_iterator:
+        response_body_bytes += chunk
+    
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = """
+            INSERT INTO api_logs (request_path, request_method, request_payload, response_status_code, response_body, processing_time_ms)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql, (
+                str(request.url.path),
+                request.method,
+                request_body.decode('utf-8', errors='ignore'),
+                response.status_code,
+                response_body_bytes.decode('utf-8', errors='ignore'),
+                process_time
+            ))
+        connection.commit()
+    except Exception as e:
+        print(f"Erreur de logging dans la base de données: {e}")
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
+
+    # Il faut recréer la réponse car on a consommé le body_iterator
+    return response.__class__(content=response_body_bytes, status_code=response.status_code, headers=dict(response.headers))
 
 
 # Schéma d'entrée pour prédiction à partir de paramètres
