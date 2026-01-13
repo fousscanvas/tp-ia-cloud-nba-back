@@ -164,3 +164,21 @@ def dataset_classification(file: UploadFile = File(...)):
 
     # Prédictions (batch)
     return predictor.predict_dataset(df)
+
+
+@app.get("/api/logs")
+def get_logs():
+    """Récupère les 20 derniers logs d'appels à l'API."""
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = "SELECT player_name, api_response, timestamp FROM api_logs ORDER BY timestamp DESC LIMIT 20"
+            cursor.execute(sql)
+            result = cursor.fetchall()
+            return result
+    except Exception as e:
+        print(f"Erreur de lecture des logs: {e}")
+        return {"error": "Impossible de récupérer les logs"}
+    finally:
+        if 'connection' in locals() and connection.open:
+            connection.close()
