@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import time
+import json
 import pymysql
 
 from functions import NBAPredictor   # la classe O.O (Orientée Objet)
@@ -47,46 +48,38 @@ def get_db_connection():
 
 
 @app.middleware("http")
-async def log_requests_and_responses(request: Request, call_next):
-    start_time = time.time()
-    
-    # Lire le corps de la requête
-    request_body = await request.body()
-    
+async def log_specific_requests(request: Request, call_next):
     response = await call_next(request)
     
-    # Cloner le corps de la réponse pour le logging
-    response_body_bytes = b""
-    async for chunk in response.body_iterator:
-        response_body_bytes += chunk
-    
-    process_time = (time.time() - start_time) * 1000
+    # On ne log que les requêtes qui nous intéressent
+    if "/api/nba/info" in str(request.url.path):
+        response_body_bytes = b""
+        async for chunk in response.body_iterator:
+            response_body_bytes += chunk
+        
+        player_name = request.query_params.get("Name")
+        response_data = json.loads(response_body_bytes.decode('utf-8', errors='ignore'))
+        
+        # Extraire la décision ou l'erreur
+        api_response = response_data.get("decision", [response_data.get("error", "Réponse inconnue")])[0]
 
-    def log_to_db():
-        try:
-            connection = get_db_connection()
-            with connection.cursor() as cursor:
-                sql = """
-                INSERT INTO api_logs (request_path, request_method, request_payload, response_status_code, response_body, processing_time_ms)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """
-                cursor.execute(sql, (
-                    str(request.url.path),
-                    request.method,
-                    request_body.decode('utf-8', errors='ignore'),
-                    response.status_code,
-                    response_body_bytes.decode('utf-8', errors='ignore'),
-                    process_time
-                ))
-            connection.commit()
-        except Exception as e:
-            print(f"Erreur de logging dans la base de données: {e}")
-        finally:
-            if 'connection' in locals() and connection.open:
-                connection.close()
+        def log_to_db():
+            try:
+                connection = get_db_connection()
+                with connection.cursor() as cursor:
+                    sql = "INSERT INTO api_logs (player_name, api_response) VALUES (%s, %s)"
+                    cursor.execute(sql, (player_name, api_response))
+                connection.commit()
+            except Exception as e:
+                print(f"Erreur de logging: {e}")
+            finally:
+                if 'connection' in locals() and connection.open:
+                    connection.close()
 
-    # Utiliser une BackgroundTask pour que le logging ne bloque pas la réponse
-    return StreamingResponse(iter([response_body_bytes]), status_code=response.status_code, headers=dict(response.headers), background=BackgroundTask(log_to_db))
+        # Renvoyer une nouvelle réponse tout en loggant en arrière-plan
+        return StreamingResponse(iter([response_body_bytes]), status_code=response.status_code, headers=dict(response.headers), background=BackgroundTask(log_to_db))
+
+    return response
 
 
 # Schéma d'entrée pour prédiction à partir de paramètres
