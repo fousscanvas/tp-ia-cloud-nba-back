@@ -47,32 +47,22 @@ def get_db_connection():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
-    
-    # Lire le corps de la requête (pour POST, etc.)
-    request_body = await request.body()
-    
+
     response = await call_next(request)
-    
+
     process_time = (time.time() - start_time) * 1000
-    
-    # Lire le corps de la réponse
-    response_body_bytes = b""
-    async for chunk in response.body_iterator:
-        response_body_bytes += chunk
-    
+
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
             sql = """
-            INSERT INTO api_logs (request_path, request_method, request_payload, response_status_code, response_body, processing_time_ms)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO api_logs (request_path, request_method, response_status_code, processing_time_ms)
+            VALUES (%s, %s, %s, %s)
             """
             cursor.execute(sql, (
                 str(request.url.path),
                 request.method,
-                request_body.decode('utf-8', errors='ignore'),
                 response.status_code,
-                response_body_bytes.decode('utf-8', errors='ignore'),
                 process_time
             ))
         connection.commit()
@@ -82,8 +72,7 @@ async def log_requests(request: Request, call_next):
         if 'connection' in locals() and connection.open:
             connection.close()
 
-    # Il faut recréer la réponse car on a consommé le body_iterator
-    return response.__class__(content=response_body_bytes, status_code=response.status_code, headers=dict(response.headers))
+    return response
 
 
 # Schéma d'entrée pour prédiction à partir de paramètres
