@@ -31,9 +31,9 @@ app.add_middleware(
 
 
 # --- Configuration de la connexion à la base de données ---
-DB_HOST = "<TON_ENDPOINT_RDS>"  # Le point de terminaison de ton cluster
+DB_HOST = "nba-project-db.cnukccqe83cq.eu-north-1.rds.amazonaws.com"  # Le point de terminaison de ton cluster
 DB_USER = "admin"
-DB_PASSWORD = "<TON_MOT_DE_PASSE_RDS>"
+DB_PASSWORD = "rootadmin"
 DB_NAME = "nba_db"
 
 def get_db_connection():
